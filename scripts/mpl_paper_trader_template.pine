@@ -13,11 +13,12 @@ MIN_TIME_GAP   = input.int(14, "Min days between taps", minval=1)
 SLOPE_DEG  = input.float(45.0, "Max slope (degrees)", minval=5, maxval=80)
 TP_R_MULT  = input.float(2.0, "Take Profit (R multiple)", step=0.5)
 
-// --- Pre-computed range for angle ---------------------------------------
-chart_high = ta.highest(high, LOOKBACK)
-chart_low  = ta.lowest(low, LOOKBACK)
+// --- Pre-computed range for angle (capped to available history) ----------
+safe_lookback = math.min(LOOKBACK, bar_index)
+chart_high = ta.highest(high, safe_lookback)
+chart_low  = ta.lowest(low, safe_lookback)
 prange = chart_high - chart_low
-brange = LOOKBACK
+brange = math.max(safe_lookback, 1)
 
 // --- Trendline detection (runs ONCE, cached in var) --------------------
 // Collect pivots once at the last bar and find the best trendline.
@@ -84,7 +85,7 @@ f_find(prices, bars, times) =>
                 bx2 := x2
     [best_n >= MIN_TAPS, by1, bx1, by2, bx2, best_n]
 
-if bar_index == last_bar_index - 1 and not detected
+if bar_index == last_bar_index - 1 and not detected and bar_index >= LOOKBACK
     log.info("Detection started: PIVOT_LEN={0}, LOOKBACK={1}", PIVOT_LEN, LOOKBACK)
     // Collect pivot highs
     pivot_hp = array.new<float>()
