@@ -31,8 +31,8 @@ var int  trendlineAttempt = 0  // 0 = ready, 1 = used (one attempt per line)
 var float entryPrice      = na
 var float stopPrice       = na
 var float tpPrice         = na
-var int   breakBar        = na
-var bool  longTrade       = na
+var int   breakBar        = 0
+var int   tradeDirection  = 0  // 0 = flat, 1 = long, -1 = short
 
 // --- Line Drawing ------------------------------------------------------
 // Draw both lines extending to the right edge of the chart.
@@ -81,27 +81,27 @@ break_bear = was_above and close < al_at_bar  // was above line, now closed belo
 // --- Entry Logic -------------------------------------------------------
 if (break_bull or break_bear) and trendlineAttempt == 0
     entryPrice := close
-    longTrade  := break_bull
+    tradeDirection  := break_bull ? 1 : -1
     breakBar   := bar_index
 
     // Stop = Safety Line value 4 bars after the break.
     stopPrice  := f_line_price(sl_price_a, sl_x1, sl_price_b, sl_x2, bar_index + 4)
     risk       := math.abs(entryPrice - stopPrice)
-    tpPrice    := if longTrade
+    tpPrice    := if tradeDirection == 1
         entryPrice + risk * tp_r_mult
     else
         entryPrice - risk * tp_r_mult
 
     // --- Visual marker on the break bar ---
-    label.new(bar_index, longTrade ? low : high,
+    label.new(bar_index, tradeDirection == 1 ? low : high,
          "BREAK\nEntry: " + str.tostring(entryPrice) + "\nStop: " +
          str.tostring(stopPrice) + "\nTP: " + str.tostring(tpPrice),
-         style = longTrade ? label.style_label_up : label.style_label_down,
-         color = longTrade ? color.green : color.red,
+         style = tradeDirection == 1 ? label.style_label_up : label.style_label_down,
+         color = tradeDirection == 1 ? color.green : color.red,
          textcolor = color.white, size = size.small)
 
     // --- Execute trade ---
-    if longTrade
+    if tradeDirection == 1
         strategy.entry("Long", strategy.long, alert_message="buy")
         strategy.exit("XL", "Long", stop=stopPrice, limit=tpPrice,
              alert_message="exit_long")
@@ -118,7 +118,8 @@ if strategy.position_size == 0 and trendlineAttempt == 1
     entryPrice := na
     stopPrice := na
     tpPrice := na
-    breakBar := na
+    breakBar := 0
+    tradeDirection := 0
 
 // --- Alerts (designed for the webhook server) --------------------------
 // Create an Alert in TradingView for each condition.  Use this as the
