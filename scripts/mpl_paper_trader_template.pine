@@ -1,48 +1,127 @@
 //@version=6
-strategy("MPL Paper Trader Template", overlay=true,
+strategy("MPL Trendline Break Strategy", overlay=true,
    initial_capital=10000, default_qty_type=strategy.fixed, default_qty_value=1,
    currency=currency.USD)
 
-// --- Strategy Parameters ------------------------------------------------
-// Phase 2: replace these with your actual strategy inputs
-buy_threshold  = input.float(0.0, "Buy Signal Threshold")
-sell_threshold = input.float(0.0, "Sell Signal Threshold")
+// --- How to use --------------------------------------------------------
+// 1. On the 4H chart zoomed to 3 months, identify a valid trendline:
+//    3+ touches, 6+ candles between touches, 3+ weeks span, slope < 45 deg.
+// 2. Note the approximate date & price of two anchor points (A = left/earlier,
+//    B = right/later).  Enter them below.
+// 3. Do the same for the opposing Safety Line that defines the stop.
+// 4. When a candle closes past the Action Line, the script alerts and enters.
 
-// --- Signal Generation --------------------------------------------------
-// Phase 2: implement your strategy logic here.
-// For now, this template generates no trades -- it's a skeleton to show
-// the alert message format.
+// --- Action Line Inputs (the primary trendline) ------------------------
+al_date_a = input.time(timestamp("2025-01-01"), "Action Line -- Date A")
+al_price_a = input.float(0.0, "Action Line -- Price A")
+al_date_b = input.time(timestamp("2025-02-01"), "Action Line -- Date B")
+al_price_b = input.float(0.0, "Action Line -- Price B")
 
-// Example placeholder -- replace with real strategy conditions:
-// buy_condition  = ta.crossover(INDICATOR, buy_threshold)
-// sell_condition = ta.crossunder(INDICATOR, sell_threshold)
+// --- Safety Line Inputs (opposing trendline for stop) ------------------
+sl_date_a = input.time(timestamp("2025-01-01"), "Safety Line -- Date A")
+sl_price_a = input.float(0.0, "Safety Line -- Price A")
+sl_date_b = input.time(timestamp("2025-02-01"), "Safety Line -- Date B")
+sl_price_b = input.float(0.0, "Safety Line -- Price B")
 
-// --- Alerts -------------------------------------------------------------
-// When you add strategy.entry() / strategy.close() calls, create an Alert
-// in TradingView for this strategy. In the alert creation dialog:
-//   1. Condition: your strategy
-//   2. Expiry: never (or as desired)
-//   3. Webhook URL: https://your-ngrok-domain.ngrok-free.app/webhook/tradingview
-//   4. Message: paste the JSON template below
+// --- Risk / Reward -----------------------------------------------------
+tp_r_mult = input.float(2.0, "Take Profit (R multiple)", step=0.5)
 
-// Expected webhook JSON format -- paste this into the alert message field:
+// --- Trendline State ---------------------------------------------------
+var int  trendlineAttempt = 0  // 0 = ready, 1 = used (one attempt per line)
+var float entryPrice      = na
+var float stopPrice       = na
+var float tpPrice         = na
+var int   breakBar        = na
+var bool  longTrade       = na
+
+// --- Line Drawing ------------------------------------------------------
+// Draw both lines extending to the right edge of the chart.
+var line actionLine = line.new(
+     na, na, na, na, extend=extend.right, color=color.blue, width=2)
+var line safetyLine = line.new(
+     na, na, na, na, extend=extend.right, color=color.red, width=2,
+     style=line.style_dashed)
+
+// Convert timestamps to bar indices for line anchor points.
+// Match within a 24h window to handle timezone / bar open differences.
+day_ms = 86400000
+al_x1 = ta.valuewhen(time >= al_date_a and time < al_date_a + day_ms, bar_index, 0)
+al_x2 = ta.valuewhen(time >= al_date_b and time < al_date_b + day_ms, bar_index, 0)
+sl_x1 = ta.valuewhen(time >= sl_date_a and time < sl_date_a + day_ms, bar_index, 0)
+sl_x2 = ta.valuewhen(time >= sl_date_b and time < sl_date_b + day_ms, bar_index, 0)
+
+// Update line coordinates.
+if not na(al_x1) and not na(al_x2)
+    line.set_xy1(actionLine, al_x1, al_price_a)
+    line.set_xy2(actionLine, al_x2, al_price_b)
+if not na(sl_x1) and not na(sl_x2)
+    line.set_xy1(safetyLine, sl_x1, sl_price_a)
+    line.set_xy2(safetyLine, sl_x2, sl_price_b)
+
+// --- Line Value at Current Bar -----------------------------------------
+// Returns the y (price) of a line at bar x.
+f_line_price(y1, x1, y2, x2, x) =>
+    if x2 == x1
+        y1  // vertical line -- use y1 as fallback
+    else
+        m = (y2 - y1) / (x2 - x1)
+        y1 + m * (x - x1)
+
+al_at_bar = f_line_price(al_price_a, al_x1, al_price_b, al_x2, bar_index)
+al_prev   = f_line_price(al_price_a, al_x1, al_price_b, al_x2, bar_index[1])
+
+// --- Break Detection ---------------------------------------------------
+// A candle must close past the Action Line to trigger.
+was_above = high[1] > al_prev
+was_below = low[1]  < al_prev
+
+break_bull = was_below and close > al_at_bar  // was under line, now closed above
+break_bear = was_above and close < al_at_bar  // was above line, now closed below
+
+// --- Entry Logic -------------------------------------------------------
+if (break_bull or break_bear) and trendlineAttempt == 0
+    entryPrice := close
+    longTrade  := break_bull
+    breakBar   := bar_index
+
+    // Stop = Safety Line value 4 bars after the break.
+    stopPrice  := f_line_price(sl_price_a, sl_x1, sl_price_b, sl_x2, bar_index + 4)
+    risk       := math.abs(entryPrice - stopPrice)
+    tpPrice    := longTrade ? entryPrice + risk * tp_r_mult
+                            : entryPrice - risk * tp_r_mult
+
+    // --- Visual marker on the break bar ---
+    label.new(bar_index, longTrade ? low : high,
+         "BREAK\nEntry: " + str.tostring(entryPrice) + "\nStop: " +
+         str.tostring(stopPrice) + "\nTP: " + str.tostring(tpPrice),
+         style = longTrade ? label.style_label_up : label.style_label_down,
+         color = longTrade ? color.green : color.red,
+         textcolor = color.white, size = size.small)
+
+    // --- Execute trade ---
+    if longTrade
+        strategy.entry("Long", strategy.long, alert_message="buy")
+        strategy.exit("XL", "Long", stop=stopPrice, limit=tpPrice,
+             alert_message="exit_long")
+    else
+        strategy.entry("Short", strategy.short, alert_message="sell")
+        strategy.exit("XS", "Short", stop=stopPrice, limit=tpPrice,
+             alert_message="exit_short")
+
+    trendlineAttempt := 1  // One attempt per trendline.
+
+// --- Reset After Trade Closes ------------------------------------------
+if strategy.position_size == 0 and trendlineAttempt == 1
+    trendlineAttempt := 0
+    entryPrice := na; stopPrice := na; tpPrice := na; breakBar := na
+
+// --- Alerts (designed for the webhook server) --------------------------
+// Create an Alert in TradingView for each condition.  Use this as the
+// alert message body:
 //
-// {
-//   "ticker":   "{{ticker}}",
-//   "action":   "{{strategy.order.alert_message}}",
-//   "price":    {{strategy.order.price}},
-//   "qty":      1,
-//   "signal_id": "sig_{{timenow}}",
-//   "strategy": "MPL Paper Trader Template"
-// }
-//
-// Action values expected by the webhook server:
-//   "buy"         -- open long (if flat) or error (if already long)
-//   "sell"        -- open short (if flat) or error (if already short)
-//   "exit_long"   -- close long position
-//   "exit_short"  -- close short position
-//   "close_all"   -- close current position regardless of direction
+// {"ticker":"{{ticker}}","action":"{{strategy.order.alert_message}}",
+//  "price":{{strategy.order.price}},"qty":1,
+//  "signal_id":"sig_{{timenow}}","strategy":"TrendlineBreak"}
 
-// When you execute a trade, pass the action via alert_message:
-// strategy.entry("Long", strategy.long, alert_message="buy")
-// strategy.close("Long", alert_message="exit_long")
+alertcondition(break_bull, "Long Entry", "Action Line broken up")
+alertcondition(break_bear, "Short Entry", "Action Line broken down")
