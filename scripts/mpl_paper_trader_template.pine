@@ -81,6 +81,7 @@ f_find(prices, bars, times) =>
     [best_n >= MIN_TAPS, by1, bx1, by2, bx2, best_n]
 
 if bar_index == last_bar_index - 1 and not detected
+    log.info("Detection started: PIVOT_LEN={0}, LOOKBACK={1}", PIVOT_LEN, LOOKBACK)
     // Collect pivot highs
     ph_series = ta.pivothigh(high, PIVOT_LEN, PIVOT_LEN)
     pl_series = ta.pivotlow(low, PIVOT_LEN, PIVOT_LEN)
@@ -101,9 +102,11 @@ if bar_index == last_bar_index - 1 and not detected
             array.push(pivot_lp, pl)
             array.push(pivot_lb, bar_index[i])
             array.push(pivot_lt, time[i])
+    log.info("Pivots found: {0} highs, {1} lows", array.size(pivot_hp), array.size(pivot_lp))
 
     [r_ok, r_y1, r_x1, r_y2, r_x2, r_n] = f_find(pivot_hp, pivot_hb, pivot_ht)
     [s_ok, s_y1, s_x1, s_y2, s_x2, s_n] = f_find(pivot_lp, pivot_lb, pivot_lt)
+    log.info("Detection result: resistance={0} ({1} taps), support={2} ({3} taps)", r_ok, r_n, s_ok, s_n)
 
     if r_ok and s_ok
         if r_n >= s_n
@@ -116,6 +119,7 @@ if bar_index == last_bar_index - 1 and not detected
             saf_y2 := s_y2
             saf_x2 := s_x2
             detected := true
+            log.info("Using resistance as Action Line ({0} taps), support as Safety", r_n)
         else
             act_y1 := s_y1
             act_x1 := s_x1
@@ -126,6 +130,7 @@ if bar_index == last_bar_index - 1 and not detected
             saf_y2 := r_y2
             saf_x2 := r_x2
             detected := true
+            log.info("Using support as Action Line ({0} taps), resistance as Safety", s_n)
     else
         if r_ok
             act_y1 := r_y1
@@ -133,12 +138,16 @@ if bar_index == last_bar_index - 1 and not detected
             act_y2 := r_y2
             act_x2 := r_x2
             detected := true
+            log.info("Only resistance found ({0} taps), no safety line", r_n)
         if s_ok
             act_y1 := s_y1
             act_x1 := s_x1
             act_y2 := s_y2
             act_x2 := s_x2
             detected := true
+            log.info("Only support found ({0} taps), no safety line", s_n)
+    if not detected
+        log.warning("No valid trendline found. Try reducing Pivot sensitivity or Lookback")
 
 // --- Draw lines (every bar to keep them extending) -----------------------
 var line actionLine = line.new(na, na, na, na, extend=extend.right, color=color.blue, width=2)
@@ -172,6 +181,9 @@ if detected
         break_is_bull := was_below and close > ap
         break_is_bear := was_above and close < ap
         action_broken := break_is_bull or break_is_bear
+        if action_broken
+            log.info("BREAK: {0} line broken at {1} ({2})",
+                 break_is_bull ? "bullish" : "bearish", ap, str.tostring(bar_index))
 
 // --- Entry ---------------------------------------------------------------
 var int  attempt = 0
