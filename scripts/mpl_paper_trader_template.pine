@@ -31,6 +31,10 @@ var float saf_y2 = na
 var int   saf_x2 = na
 var bool  detected = false
 
+// --- Pre-compute pivot series at top level (Pine consistency requirement) -
+ph_series = ta.pivothigh(high, PIVOT_LEN, PIVOT_LEN)
+pl_series = ta.pivotlow(low, PIVOT_LEN, PIVOT_LEN)
+
 // --- Trendline fitting helper --------------------------------------------
 f_find(prices, bars, times) =>
     n = array.size(prices)
@@ -83,8 +87,6 @@ f_find(prices, bars, times) =>
 if bar_index == last_bar_index - 1 and not detected
     log.info("Detection started: PIVOT_LEN={0}, LOOKBACK={1}", PIVOT_LEN, LOOKBACK)
     // Collect pivot highs
-    ph_series = ta.pivothigh(high, PIVOT_LEN, PIVOT_LEN)
-    pl_series = ta.pivotlow(low, PIVOT_LEN, PIVOT_LEN)
     pivot_hp = array.new<float>()
     pivot_hb = array.new<int>()
     pivot_ht = array.new<int>()
