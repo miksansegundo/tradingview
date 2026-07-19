@@ -35,6 +35,8 @@ var bool  detected = false
 // --- Pre-compute pivot series at top level (Pine consistency requirement) -
 ph_series = ta.pivothigh(high, PIVOT_LEN, PIVOT_LEN)
 pl_series = ta.pivotlow(low, PIVOT_LEN, PIVOT_LEN)
+max_bars_back(ph_series, LOOKBACK + PIVOT_LEN)
+max_bars_back(pl_series, LOOKBACK + PIVOT_LEN)
 
 // --- Trendline fitting helper --------------------------------------------
 f_find(prices, bars, times) =>
