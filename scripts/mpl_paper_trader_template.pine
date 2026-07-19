@@ -14,8 +14,8 @@ sell_threshold = input.float(0.0, "Sell Signal Threshold")
 // the alert message format.
 
 // Example placeholder -- replace with real strategy conditions:
-// buy_condition  = ta.crossover(/* your indicator */, buy_threshold)
-// sell_condition = ta.crossunder(/* your indicator */, sell_threshold)
+// buy_condition  = ta.crossover(INDICATOR, buy_threshold)
+// sell_condition = ta.crossunder(INDICATOR, sell_threshold)
 
 // --- Alerts -------------------------------------------------------------
 // When you add strategy.entry() / strategy.close() calls, create an Alert
@@ -25,25 +25,23 @@ sell_threshold = input.float(0.0, "Sell Signal Threshold")
 //   3. Webhook URL: https://your-ngrok-domain.ngrok-free.app/webhook/tradingview
 //   4. Message: paste the JSON template below
 
-/*
-Expected webhook JSON format -- paste this into the alert message field:
-
-{
-  "ticker":   "{{ticker}}",
-  "action":   "{{strategy.order.alert_message}}",
-  "price":    {{strategy.order.price}},
-  "qty":      1,
-  "signal_id": "sig_{{timenow}}",
-  "strategy": "MPL Paper Trader Template"
-}
-
-Action values expected by the webhook server:
-  "buy"         -- open long (if flat) or error (if already long)
-  "sell"        -- open short (if flat) or error (if already short)
-  "exit_long"   -- close long position
-  "exit_short"  -- close short position
-  "close_all"   -- close current position regardless of direction
-*/
+// Expected webhook JSON format -- paste this into the alert message field:
+//
+// {
+//   "ticker":   "{{ticker}}",
+//   "action":   "{{strategy.order.alert_message}}",
+//   "price":    {{strategy.order.price}},
+//   "qty":      1,
+//   "signal_id": "sig_{{timenow}}",
+//   "strategy": "MPL Paper Trader Template"
+// }
+//
+// Action values expected by the webhook server:
+//   "buy"         -- open long (if flat) or error (if already long)
+//   "sell"        -- open short (if flat) or error (if already short)
+//   "exit_long"   -- close long position
+//   "exit_short"  -- close short position
+//   "close_all"   -- close current position regardless of direction
 
 // When you execute a trade, pass the action via alert_message:
 // strategy.entry("Long", strategy.long, alert_message="buy")
