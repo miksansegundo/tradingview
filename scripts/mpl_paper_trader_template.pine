@@ -149,6 +149,7 @@ f_price(y1, x1, y2, x2, x) =>
 action_price = float(na)
 action_broken = false
 break_is_bull = false
+break_is_bear = false
 
 if action_ok
     ay1 = line.get_y1(actionLine)
