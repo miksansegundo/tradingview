@@ -3,21 +3,21 @@ strategy("MPL Paper Trader Template", overlay=true,
    initial_capital=10000, default_qty_type=strategy.fixed, default_qty_value=1,
    currency=currency.USD)
 
-// ─── Strategy Parameters ─────────────────────────────────────────────
+// --- Strategy Parameters ------------------------------------------------
 // Phase 2: replace these with your actual strategy inputs
 buy_threshold  = input.float(0.0, "Buy Signal Threshold")
 sell_threshold = input.float(0.0, "Sell Signal Threshold")
 
-// ─── Signal Generation ───────────────────────────────────────────────
+// --- Signal Generation --------------------------------------------------
 // Phase 2: implement your strategy logic here.
-// For now, this template generates no trades — it's a skeleton to show
+// For now, this template generates no trades -- it's a skeleton to show
 // the alert message format.
 
-// Example placeholder — replace with real strategy conditions:
+// Example placeholder -- replace with real strategy conditions:
 // buy_condition  = ta.crossover(/* your indicator */, buy_threshold)
 // sell_condition = ta.crossunder(/* your indicator */, sell_threshold)
 
-// ─── Alerts ──────────────────────────────────────────────────────────
+// --- Alerts -------------------------------------------------------------
 // When you add strategy.entry() / strategy.close() calls, create an Alert
 // in TradingView for this strategy. In the alert creation dialog:
 //   1. Condition: your strategy
@@ -26,7 +26,7 @@ sell_threshold = input.float(0.0, "Sell Signal Threshold")
 //   4. Message: paste the JSON template below
 
 /*
-Expected webhook JSON format — paste this into the alert message field:
+Expected webhook JSON format -- paste this into the alert message field:
 
 {
   "ticker":   "{{ticker}}",
@@ -38,11 +38,11 @@ Expected webhook JSON format — paste this into the alert message field:
 }
 
 Action values expected by the webhook server:
-  "buy"         — open long (if flat) or error (if already long)
-  "sell"        — open short (if flat) or error (if already short)
-  "exit_long"   — close long position
-  "exit_short"  — close short position
-  "close_all"   — close current position regardless of direction
+  "buy"         -- open long (if flat) or error (if already long)
+  "sell"        -- open short (if flat) or error (if already short)
+  "exit_long"   -- close long position
+  "exit_short"  -- close short position
+  "close_all"   -- close current position regardless of direction
 */
 
 // When you execute a trade, pass the action via alert_message:
