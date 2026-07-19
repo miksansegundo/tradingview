@@ -3,218 +3,99 @@ strategy("MPL Trendline Break Strategy", overlay=true,
    initial_capital=10000, default_qty_type=strategy.fixed, default_qty_value=1,
    currency=currency.USD)
 
-// --- Parameters ---------------------------------------------------------
-LOOKBACK   = input.int(540, "Lookback (bars)", minval=100)
-PIVOT_LEN  = input.int(5,  "Pivot sensitivity", minval=1)
-TOUCH_TOL  = input.float(0.003, "Touch tolerance %", step=0.001)
-MIN_TAPS   = input.int(3,   "Min touches", minval=2)
-MIN_CANDLE_GAP = input.int(6, "Min candles between taps", minval=1)
-MIN_TIME_GAP   = input.int(14, "Min days between taps", minval=1)
-SLOPE_DEG  = input.float(45.0, "Max slope (degrees)", minval=5, maxval=80)
-TP_R_MULT  = input.float(2.0, "Take Profit (R multiple)", step=0.5)
+// --- How to use ----------------------------------------------------------
+// 1. On the 4H chart zoomed to 3 months, identify a valid trendline:
+//    3+ touches, 6+ candles between touches, 3+ weeks span, slope < 45 deg.
+// 2. Note the TWO anchor points (A = earlier/left, B = later/right).
+//    Enter their dates and prices in the Inputs below (click the gear icon).
+// 3. Do the same for the Safety Line (the opposing trendline for the stop).
+// 4. The script draws both lines and monitors for a candle close past Action.
 
-// --- Pre-computed range for angle (capped to available history) ----------
-safe_lookback = math.max(math.min(LOOKBACK, bar_index), 1)
-chart_high = ta.highest(high, safe_lookback)
-chart_low  = ta.lowest(low, safe_lookback)
-prange = chart_high - chart_low
-brange = math.max(safe_lookback, 1)
+// --- Action Line (the trendline to trade) ---------------------------------
+al_d1 = input.time(timestamp("2025-01-01"), "Action Line - Date A")
+al_p1 = input.float(0.0, "Action Line - Price A")
+al_d2 = input.time(timestamp("2025-02-01"), "Action Line - Date B")
+al_p2 = input.float(0.0, "Action Line - Price B")
 
-// --- Trendline detection (runs ONCE, cached in var) --------------------
-// Collect pivots once at the last bar and find the best trendline.
-var float act_y1 = na
-var int   act_x1 = na
-var float act_y2 = na
-var int   act_x2 = na
-var float saf_y1 = na
-var int   saf_x1 = na
-var float saf_y2 = na
-var int   saf_x2 = na
-var bool  detected = false
+// --- Safety Line (opposing trendline for stop loss) -----------------------
+sl_d1 = input.time(timestamp("2025-01-01"), "Safety Line - Date A")
+sl_p1 = input.float(0.0, "Safety Line - Price A")
+sl_d2 = input.time(timestamp("2025-02-01"), "Safety Line - Date B")
+sl_p2 = input.float(0.0, "Safety Line - Price B")
 
-// --- Pre-compute pivot series at top level (Pine consistency requirement) -
-ph_series = ta.pivothigh(high, PIVOT_LEN, PIVOT_LEN)
-pl_series = ta.pivotlow(low, PIVOT_LEN, PIVOT_LEN)
-max_bars_back(ph_series, 600)
-max_bars_back(pl_series, 600)
+// --- Risk / Reward --------------------------------------------------------
+tp_r = input.float(2.0, "Take Profit (R multiple)", step=0.5)
 
-// --- Trendline fitting helper --------------------------------------------
-f_find(prices, bars, times) =>
-    n = array.size(prices)
-    best_n = 0
-    by1 = float(na)
-    bx1 = int(na)
-    by2 = float(na)
-    bx2 = int(na)
-    g = MIN_TIME_GAP * 86400000
-    for i = 0 to n - 2
-        y1 = array.get(prices, i)
-        x1 = array.get(bars, i)
-        for j = i + 1 to n - 1
-            y2 = array.get(prices, j)
-            x2 = array.get(bars, j)
-            rise = y2 - y1
-            run = x2 - x1
-            angle = math.abs(math.atan((rise / prange) / (run / brange)) * 180.0 / math.pi)
-            if angle > SLOPE_DEG
-                continue
-            span = x2 - x1
-            if span < 126
-                continue
-            cnt = 0
-            lt_bar = -999
-            lt_tim = 0
-            for k = 0 to n - 1
-                px = array.get(bars, k)
-                py = array.get(prices, k)
-                pt = array.get(times, k)
-                if px < x1 or px > x2
-                    continue
-                m = (y2 - y1) / (x2 - x1)
-                lp = y1 + m * (px - x1)
-                if math.abs(py - lp) / lp <= TOUCH_TOL
-                    candle_ok = px - lt_bar >= MIN_CANDLE_GAP
-                    time_ok = lt_tim == 0 or (pt - lt_tim) >= g
-                    if candle_ok or time_ok
-                        cnt += 1
-                        lt_bar := px
-                        lt_tim := pt
-            if cnt >= best_n
-                best_n := cnt
-                by1 := y1
-                bx1 := x1
-                by2 := y2
-                bx2 := x2
-    [best_n >= MIN_TAPS, by1, bx1, by2, bx2, best_n]
+// --- Find bar indices for the input dates ---------------------------------
+// Match within a 24h window for timezone tolerance.
+day = 86400000
+al_b1 = ta.valuewhen(time >= al_d1 and time < al_d1 + day, bar_index, 0)
+al_b2 = ta.valuewhen(time >= al_d2 and time < al_d2 + day, bar_index, 0)
+sl_b1 = ta.valuewhen(time >= sl_d1 and time < sl_d1 + day, bar_index, 0)
+sl_b2 = ta.valuewhen(time >= sl_d2 and time < sl_d2 + day, bar_index, 0)
 
-if bar_index == last_bar_index - 1 and not detected and bar_index >= LOOKBACK
-    log.info("Detection started: PIVOT_LEN={0}, LOOKBACK={1}", PIVOT_LEN, LOOKBACK)
-    // Collect pivot highs
-    pivot_hp = array.new<float>()
-    pivot_hb = array.new<int>()
-    pivot_ht = array.new<int>()
-    pivot_lp = array.new<float>()
-    pivot_lb = array.new<int>()
-    pivot_lt = array.new<int>()
-    for i = PIVOT_LEN to LOOKBACK
-        ph = ph_series[i]
-        if not na(ph)
-            array.push(pivot_hp, ph)
-            array.push(pivot_hb, bar_index[i])
-            array.push(pivot_ht, time[i])
-        pl = pl_series[i]
-        if not na(pl)
-            array.push(pivot_lp, pl)
-            array.push(pivot_lb, bar_index[i])
-            array.push(pivot_lt, time[i])
-    log.info("Pivots found: {0} highs, {1} lows", array.size(pivot_hp), array.size(pivot_lp))
+// --- Draw lines -----------------------------------------------------------
+var line actionLine = line.new(na, na, na, na, extend=extend.right,
+     color=color.blue, width=2)
+var line safetyLine = line.new(na, na, na, na, extend=extend.right,
+     color=color.red, width=2, style=line.style_dashed)
 
-    [r_ok, r_y1, r_x1, r_y2, r_x2, r_n] = f_find(pivot_hp, pivot_hb, pivot_ht)
-    [s_ok, s_y1, s_x1, s_y2, s_x2, s_n] = f_find(pivot_lp, pivot_lb, pivot_lt)
-    log.info("Detection result: resistance={0} ({1} taps), support={2} ({3} taps)", r_ok, r_n, s_ok, s_n)
+a_ok = not na(al_b1) and not na(al_b2)
+s_ok = not na(sl_b1) and not na(sl_b2)
 
-    if r_ok and s_ok
-        if r_n >= s_n
-            act_y1 := r_y1
-            act_x1 := r_x1
-            act_y2 := r_y2
-            act_x2 := r_x2
-            saf_y1 := s_y1
-            saf_x1 := s_x1
-            saf_y2 := s_y2
-            saf_x2 := s_x2
-            detected := true
-            log.info("Using resistance as Action Line ({0} taps), support as Safety", r_n)
-        else
-            act_y1 := s_y1
-            act_x1 := s_x1
-            act_y2 := s_y2
-            act_x2 := s_x2
-            saf_y1 := r_y1
-            saf_x1 := r_x1
-            saf_y2 := r_y2
-            saf_x2 := r_x2
-            detected := true
-            log.info("Using support as Action Line ({0} taps), resistance as Safety", s_n)
-    else
-        if r_ok
-            act_y1 := r_y1
-            act_x1 := r_x1
-            act_y2 := r_y2
-            act_x2 := r_x2
-            detected := true
-            log.info("Only resistance found ({0} taps), no safety line", r_n)
-        if s_ok
-            act_y1 := s_y1
-            act_x1 := s_x1
-            act_y2 := s_y2
-            act_x2 := s_x2
-            detected := true
-            log.info("Only support found ({0} taps), no safety line", s_n)
-    if not detected
-        log.warning("No valid trendline found. Try reducing Pivot sensitivity or Lookback")
+if a_ok
+    line.set_xy1(actionLine, al_b1, al_p1)
+    line.set_xy2(actionLine, al_b2, al_p2)
+if s_ok
+    line.set_xy1(safetyLine, sl_b1, sl_p1)
+    line.set_xy2(safetyLine, sl_b2, sl_p2)
 
-// --- Draw lines (every bar to keep them extending) -----------------------
-var line actionLine = line.new(na, na, na, na, extend=extend.right, color=color.blue, width=2)
-var line safetyLine = line.new(na, na, na, na, extend=extend.right, color=color.red, width=2, style=line.style_dashed)
-
-if detected
-    line.set_xy1(actionLine, act_x1, act_y1)
-    line.set_xy2(actionLine, act_x2, act_y2)
-    if not na(saf_y1)
-        line.set_xy1(safetyLine, saf_x1, saf_y1)
-        line.set_xy2(safetyLine, saf_x2, saf_y2)
-
-// --- Line value ----------------------------------------------------------
-f_price(y1, x1, y2, x2, x) =>
+// --- Line value at a bar --------------------------------------------------
+f_line(y1, x1, y2, x2, x) =>
     if na(x1) or na(x2) or x2 == x1
         na
     else
         y1 + ((y2 - y1) / (x2 - x1)) * (x - x1)
 
-// --- Break detection -----------------------------------------------------
-action_broken = false
-break_is_bull = false
-break_is_bear = false
+// --- Break detection ------------------------------------------------------
+broken = false
+is_bull = false
 
-if detected
-    ap = f_price(act_y1, act_x1, act_y2, act_x2, bar_index)
-    pp = f_price(act_y1, act_x1, act_y2, act_x2, bar_index[1])
-    if not na(ap) and bar_index >= act_x2
+if a_ok
+    ap = f_line(al_p1, al_b1, al_p2, al_b2, bar_index)
+    pp = f_line(al_p1, al_b1, al_p2, al_b2, bar_index[1])
+    if not na(ap) and bar_index >= al_b2
         was_above = high[1] > pp
         was_below = low[1] < pp
-        break_is_bull := was_below and close > ap
-        break_is_bear := was_above and close < ap
-        action_broken := break_is_bull or break_is_bear
-        if action_broken
-            log.info("BREAK: {0} line broken at {1} ({2})",
-                 break_is_bull ? "bullish" : "bearish", ap, str.tostring(bar_index))
+        is_bull := was_below and close > ap
+        is_bear := was_above and close < ap
+        broken := is_bull or is_bear
 
-// --- Entry ---------------------------------------------------------------
+// --- Entry ----------------------------------------------------------------
 var int  attempt = 0
 var float entryP = na
-var float stopP = na
-var float tpP = na
-var int  direction = 0
+var float stopP  = na
+var float tpP    = na
+var int   dir    = 0
 
-if action_broken and attempt == 0
+if broken and attempt == 0
     entryP := close
-    direction := break_is_bull ? 1 : -1
-    if not na(saf_y1)
-        stopP := f_price(saf_y1, saf_x1, saf_y2, saf_x2, bar_index + 4)
+    dir := is_bull ? 1 : -1
+    if s_ok
+        stopP := f_line(sl_p1, sl_b1, sl_p2, sl_b2, bar_index + 4)
     else
-        stopP := direction == 1 ? low - (high - low) * 2 : high + (high - low) * 2
+        stopP := dir == 1 ? low - (high - low) * 2 : high + (high - low) * 2
     risk = math.abs(entryP - stopP)
-    tpP := if direction == 1
-        entryP + risk * TP_R_MULT
+    tpP := if dir == 1
+        entryP + risk * tp_r
     else
-        entryP - risk * TP_R_MULT
-    label.new(bar_index, direction == 1 ? low : high,
+        entryP - risk * tp_r
+    label.new(bar_index, dir == 1 ? low : high,
          "BREAK\nE:" + str.tostring(entryP) + "\nS:" + str.tostring(stopP) + "\nT:" + str.tostring(tpP),
-         style = direction == 1 ? label.style_label_up : label.style_label_down,
-         color = direction == 1 ? color.green : color.red,
+         style = dir == 1 ? label.style_label_up : label.style_label_down,
+         color = dir == 1 ? color.green : color.red,
          textcolor = color.white, size = size.small)
-    if direction == 1
+    if dir == 1
         strategy.entry("L", strategy.long, alert_message="buy")
         strategy.exit("XL", "L", stop=stopP, limit=tpP, alert_message="exit_long")
     else
@@ -227,6 +108,6 @@ if strategy.position_size == 0 and attempt == 1
     entryP := na
     stopP := na
     tpP := na
-    direction := 0
+    dir := 0
 
-alertcondition(action_broken, "Trendline Break", "Price broke the auto-detected trendline")
+alertcondition(broken, "Trendline Break", "Price broke the Action Line")
