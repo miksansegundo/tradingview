@@ -4,68 +4,42 @@ strategy("MPL Trendline Break Strategy", overlay=true,
    currency=currency.USD)
 
 // --- How to use ----------------------------------------------------------
-// 1. On the 4H chart zoomed to 3 months, identify a valid trendline:
-//    3+ touches, 6+ candles between touches, 3+ weeks span, slope < 45 deg.
-// 2. Note the TWO anchor points (A = earlier/left, B = later/right).
-//    Enter their dates and prices in the Inputs below (click the gear icon).
-// 3. Do the same for the Safety Line (the opposing trendline for the stop).
-// 4. The script draws both lines and monitors for a candle close past Action.
+// 1. Draw TWO trendlines on the chart using the Line tool (Alt+L):
+//    - Action Line (blue): the trendline to trade -- 3+ touches, <45 deg
+//    - Safety Line (red dashed): the opposing trendline that defines the stop
+// 2. Open the script Settings (gear icon) and select each line from the dropdown.
+// 3. The script monitors for a candle close past the Action Line.
 
-// --- Action Line (the trendline to trade) ---------------------------------
-al_d1 = input.time(timestamp("2025-01-01"), "Action Line - Date A")
-al_p1 = input.float(0.0, "Action Line - Price A")
-al_d2 = input.time(timestamp("2025-02-01"), "Action Line - Date B")
-al_p2 = input.float(0.0, "Action Line - Price B")
-
-// --- Safety Line (opposing trendline for stop loss) -----------------------
-sl_d1 = input.time(timestamp("2025-01-01"), "Safety Line - Date A")
-sl_p1 = input.float(0.0, "Safety Line - Price A")
-sl_d2 = input.time(timestamp("2025-02-01"), "Safety Line - Date B")
-sl_p2 = input.float(0.0, "Safety Line - Price B")
-
-// --- Risk / Reward --------------------------------------------------------
+// --- Inputs: pick the lines you drew on the chart -------------------------
+actionLine = input.line(defval=na, title="Action Line (draw on chart)")
+safetyLine = input.line(defval=na, title="Safety Line (draw on chart)")
 tp_r = input.float(2.0, "Take Profit (R multiple)", step=0.5)
 
-// --- Find bar indices for the input dates ---------------------------------
-// Match within a 24h window for timezone tolerance.
-day = 86400000
-al_b1 = ta.valuewhen(time >= al_d1 and time < al_d1 + day, bar_index, 0)
-al_b2 = ta.valuewhen(time >= al_d2 and time < al_d2 + day, bar_index, 0)
-sl_b1 = ta.valuewhen(time >= sl_d1 and time < sl_d1 + day, bar_index, 0)
-sl_b2 = ta.valuewhen(time >= sl_d2 and time < sl_d2 + day, bar_index, 0)
-
-// --- Draw lines -----------------------------------------------------------
-var line actionLine = line.new(na, na, na, na, extend=extend.right,
-     color=color.blue, width=2)
-var line safetyLine = line.new(na, na, na, na, extend=extend.right,
-     color=color.red, width=2, style=line.style_dashed)
-
-a_ok = not na(al_b1) and not na(al_b2)
-s_ok = not na(sl_b1) and not na(sl_b2)
-
-if a_ok
-    line.set_xy1(actionLine, al_b1, al_p1)
-    line.set_xy2(actionLine, al_b2, al_p2)
-if s_ok
-    line.set_xy1(safetyLine, sl_b1, sl_p1)
-    line.set_xy2(safetyLine, sl_b2, sl_p2)
-
-// --- Line value at a bar --------------------------------------------------
-f_line(y1, x1, y2, x2, x) =>
-    if na(x1) or na(x2) or x2 == x1
-        na
-    else
-        y1 + ((y2 - y1) / (x2 - x1)) * (x - x1)
+// --- Extend both lines to the right ---------------------------------------
+if not na(actionLine)
+    line.set_extend(actionLine, extend.right)
+    line.set_style(actionLine, line.style_solid)
+    line.set_width(actionLine, 2)
+    line.set_color(actionLine, color.blue)
+if not na(safetyLine)
+    line.set_extend(safetyLine, extend.right)
+    line.set_style(safetyLine, line.style_dashed)
+    line.set_width(safetyLine, 2)
+    line.set_color(safetyLine, color.red)
 
 // --- Break detection ------------------------------------------------------
 broken = false
 is_bull = false
 is_bear = false
 
+a_ok = not na(actionLine)
+s_ok = not na(safetyLine)
+
 if a_ok
-    ap = f_line(al_p1, al_b1, al_p2, al_b2, bar_index)
-    pp = f_line(al_p1, al_b1, al_p2, al_b2, bar_index[1])
-    if not na(ap) and bar_index >= al_b2
+    ap = line.get_price(actionLine, bar_index)
+    pp = line.get_price(actionLine, bar_index[1])
+    ax2 = line.get_x2(actionLine)
+    if not na(ap) and bar_index >= ax2
         was_above = high[1] > pp
         was_below = low[1] < pp
         is_bull := was_below and close > ap
@@ -83,7 +57,7 @@ if broken and attempt == 0
     entryP := close
     dir := is_bull ? 1 : -1
     if s_ok
-        stopP := f_line(sl_p1, sl_b1, sl_p2, sl_b2, bar_index + 4)
+        stopP := line.get_price(safetyLine, bar_index + 4)
     else
         stopP := dir == 1 ? low - (high - low) * 2 : high + (high - low) * 2
     risk = math.abs(entryP - stopP)
