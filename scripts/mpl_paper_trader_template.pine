@@ -11,6 +11,7 @@ PIVOT_LEN  = input.int(3,  "Pivot sensitivity", minval=1)   // higher = fewer pi
 TOUCH_TOL  = input.float(0.003, "Touch tolerance %", step=0.001)  // 0.3%
 MIN_TAPS   = input.int(3,   "Min touches", minval=2)
 MIN_CANDLE_GAP = input.int(6, "Min candles between taps", minval=1)
+MIN_TIME_GAP   = input.int(14, "Min days between taps", minval=1)
 SLOPE_DEG  = input.float(45.0, "Max slope (degrees)", minval=5, maxval=80)
 TP_R_MULT  = input.float(2.0, "Take Profit (R multiple)", step=0.5)
 
@@ -38,27 +39,34 @@ line_angle(y1, x1, y2, x2) =>
 // --- Swing point detection ---------------------------------------------
 // Collect recent pivot highs and lows.
 pivot_highs = array.new<float>()
-pivot_hbids = array.new<int>()    // bar_index of each pivot high
+pivot_hbids = array.new<int>()
+pivot_htimes = array.new<int>()   // timestamp of each pivot high
 pivot_lows  = array.new<float>()
 pivot_lbids = array.new<int>()
+pivot_ltimes = array.new<int>()   // timestamp of each pivot low
 
 for i = PIVOT_LEN to LOOKBACK
     ph = ta.pivothigh(high, PIVOT_LEN, PIVOT_LEN)[i]
     if not na(ph)
         array.push(pivot_highs, ph)
         array.push(pivot_hbids, bar_index[i])
+        array.push(pivot_htimes, time[i])
     pl = ta.pivotlow(low, PIVOT_LEN, PIVOT_LEN)[i]
     if not na(pl)
         array.push(pivot_lows, pl)
         array.push(pivot_lbids, bar_index[i])
+        array.push(pivot_ltimes, time[i])
 
 // --- Trendline fitting --------------------------------------------------
 // For a given set of pivot points, find a line that touches N+ of them
 // within tolerance.  Returns [ok, y1, x1, y2, x2, touch_count].
-find_trendline(prices, bar_ids, is_resistance) =>
+find_trendline(prices, bar_ids, times, is_resistance) =>
     n = array.size(prices)
     best_count = 0
     best_y1 = na; best_x1 = na; best_y2 = na; best_x2 = na
+
+    // Pre-compute time gap in ms
+    time_gap_ms = MIN_TIME_GAP * 86400000
 
     // Try every pair of pivots as anchor points.
     for i = 0 to n - 2
@@ -81,9 +89,11 @@ find_trendline(prices, bar_ids, is_resistance) =>
             // Count touches within tolerance
             count = 0
             last_touch_bar = -999
+            last_touch_time = 0
             for k = 0 to n - 1
                 px = array.get(bar_ids, k)
                 py = array.get(prices, k)
+                pt = array.get(times, k)
                 if px < x1 or px > x2
                     continue
 
@@ -94,10 +104,13 @@ find_trendline(prices, bar_ids, is_resistance) =>
                 // Distance as % of price
                 dist_pct = math.abs(py - line_price) / line_price
                 if dist_pct <= TOUCH_TOL
-                    // Check spacing: 6+ candles since last touch
-                    if px - last_touch_bar >= MIN_CANDLE_GAP
+                    // Check spacing: 6+ candles OR 2+ weeks since last touch
+                    candle_ok = px - last_touch_bar >= MIN_CANDLE_GAP
+                    time_ok   = last_touch_time == 0 or (pt - last_touch_time) >= time_gap_ms
+                    if candle_ok or time_ok
                         count += 1
                         last_touch_bar := px
+                        last_touch_time := pt
 
             if count >= best_count
                 best_count := count
@@ -107,8 +120,8 @@ find_trendline(prices, bar_ids, is_resistance) =>
     [best_count >= MIN_TAPS, best_y1, best_x1, best_y2, best_x2, best_count]
 
 // Run detection for both resistance (pivot highs) and support (pivot lows).
-[res_ok, res_y1, res_x1, res_y2, res_x2, res_count]  = find_trendline(pivot_highs, pivot_hbids, true)
-[spt_ok, spt_y1, spt_x1, spt_y2, spt_x2, spt_count]  = find_trendline(pivot_lows,  pivot_lbids, false)
+[res_ok, res_y1, res_x1, res_y2, res_x2, res_count]  = find_trendline(pivot_highs, pivot_hbids, pivot_htimes, true)
+[spt_ok, spt_y1, spt_x1, spt_y2, spt_x2, spt_count]  = find_trendline(pivot_lows,  pivot_lbids, pivot_ltimes, false)
 
 // Pick the stronger line (more touches) as Action, the other as Safety.
 // If only one is valid, the Safety defaults to a static offset.
