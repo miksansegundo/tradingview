@@ -86,7 +86,7 @@ if (break_bull or break_bear) and trendlineAttempt == 0
 
     // Stop = Safety Line value 4 bars after the break.
     stopPrice  := f_line_price(sl_price_a, sl_x1, sl_price_b, sl_x2, bar_index + 4)
-    risk       := math.abs(entryPrice - stopPrice)
+    risk       = math.abs(entryPrice - stopPrice)
     tpPrice    := if tradeDirection == 1
         entryPrice + risk * tp_r_mult
     else
