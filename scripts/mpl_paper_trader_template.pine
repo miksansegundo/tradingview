@@ -3,131 +3,218 @@ strategy("MPL Trendline Break Strategy", overlay=true,
    initial_capital=10000, default_qty_type=strategy.fixed, default_qty_value=1,
    currency=currency.USD)
 
-// --- How to use --------------------------------------------------------
-// 1. On the 4H chart zoomed to 3 months, identify a valid trendline:
-//    3+ touches, 6+ candles between touches, 3+ weeks span, slope < 45 deg.
-// 2. Note the approximate date & price of two anchor points (A = left/earlier,
-//    B = right/later).  Enter them below.
-// 3. Do the same for the opposing Safety Line that defines the stop.
-// 4. When a candle closes past the Action Line, the script alerts and enters.
+// --- Auto-detection of valid trendlines from swing pivots.
 
-// --- Action Line Inputs (the primary trendline) ------------------------
-al_date_a = input.time(timestamp("2025-01-01"), "Action Line -- Date A")
-al_price_a = input.float(0.0, "Action Line -- Price A")
-al_date_b = input.time(timestamp("2025-02-01"), "Action Line -- Date B")
-al_price_b = input.float(0.0, "Action Line -- Price B")
+// --- Parameters ---------------------------------------------------------
+LOOKBACK   = input.int(540, "Lookback (bars)", minval=100)  // ~3 months on 4H
+PIVOT_LEN  = input.int(3,  "Pivot sensitivity", minval=1)   // higher = fewer pivots
+TOUCH_TOL  = input.float(0.003, "Touch tolerance %", step=0.001)  // 0.3%
+MIN_TAPS   = input.int(3,   "Min touches", minval=2)
+MIN_CANDLE_GAP = input.int(6, "Min candles between taps", minval=1)
+SLOPE_DEG  = input.float(45.0, "Max slope (degrees)", minval=5, maxval=80)
+TP_R_MULT  = input.float(2.0, "Take Profit (R multiple)", step=0.5)
 
-// --- Safety Line Inputs (opposing trendline for stop) ------------------
-sl_date_a = input.time(timestamp("2025-01-01"), "Safety Line -- Date A")
-sl_price_a = input.float(0.0, "Safety Line -- Price A")
-sl_date_b = input.time(timestamp("2025-02-01"), "Safety Line -- Date B")
-sl_price_b = input.float(0.0, "Safety Line -- Price B")
-
-// --- Risk / Reward -----------------------------------------------------
-tp_r_mult = input.float(2.0, "Take Profit (R multiple)", step=0.5)
-
-// --- Trendline State ---------------------------------------------------
-var int  trendlineAttempt = 0  // 0 = ready, 1 = used (one attempt per line)
-var float entryPrice      = na
-var float stopPrice       = na
-var float tpPrice         = na
-var int   breakBar        = 0
-var int   tradeDirection  = 0  // 0 = flat, 1 = long, -1 = short
-
-// --- Line Drawing ------------------------------------------------------
-// Draw both lines extending to the right edge of the chart.
-var line actionLine = line.new(
-     na, na, na, na, extend=extend.right, color=color.blue, width=2)
-var line safetyLine = line.new(
-     na, na, na, na, extend=extend.right, color=color.red, width=2,
-     style=line.style_dashed)
-
-// Convert timestamps to bar indices for line anchor points.
-// Match within a 24h window to handle timezone / bar open differences.
-day_ms = 86400000
-al_x1 = ta.valuewhen(time >= al_date_a and time < al_date_a + day_ms, bar_index, 0)
-al_x2 = ta.valuewhen(time >= al_date_b and time < al_date_b + day_ms, bar_index, 0)
-sl_x1 = ta.valuewhen(time >= sl_date_a and time < sl_date_a + day_ms, bar_index, 0)
-sl_x2 = ta.valuewhen(time >= sl_date_b and time < sl_date_b + day_ms, bar_index, 0)
-
-// Update line coordinates.
-if not na(al_x1) and not na(al_x2)
-    line.set_xy1(actionLine, al_x1, al_price_a)
-    line.set_xy2(actionLine, al_x2, al_price_b)
-if not na(sl_x1) and not na(sl_x2)
-    line.set_xy1(safetyLine, sl_x1, sl_price_a)
-    line.set_xy2(safetyLine, sl_x2, sl_price_b)
-
-// --- Line Value at Current Bar -----------------------------------------
-// Returns the y (price) of a line at bar x.
-f_line_price(y1, x1, y2, x2, x) =>
-    if x2 == x1
-        y1  // vertical line -- use y1 as fallback
+// --- Helper: angle of a line in degrees on the chart --------------------
+// Uses atan of (price_change / bar_change) normalised by the visible range.
+// The user wants <45 deg when zoomed to ~3 months.
+line_angle(y1, x1, y2, x2) =>
+    rise = y2 - y1
+    run  = x2 - x1
+    if run == 0
+        90.0
     else
-        m = (y2 - y1) / (x2 - x1)
-        y1 + m * (x - x1)
+        // Compute approximate visual angle.  Because we don't know the
+        // chart's exact px/bar and px/price ratios, we normalise by the
+        // 3-month lookback range so the angle is roughly comparable to
+        // what a human sees at that zoom.
+        range_high = ta.highest(high, LOOKBACK)
+        range_low  = ta.lowest(low, LOOKBACK)
+        price_range = range_high - range_low
+        bar_range   = LOOKBACK
+        angle_rad   = math.atan((rise / price_range) / (run / bar_range))
+        angle_deg   = angle_rad * 180.0 / math.pi
+        math.abs(angle_deg)
 
-al_at_bar = f_line_price(al_price_a, al_x1, al_price_b, al_x2, bar_index)
-al_prev   = f_line_price(al_price_a, al_x1, al_price_b, al_x2, bar_index[1])
+// --- Swing point detection ---------------------------------------------
+// Collect recent pivot highs and lows.
+pivot_highs = array.new<float>()
+pivot_hbids = array.new<int>()    // bar_index of each pivot high
+pivot_lows  = array.new<float>()
+pivot_lbids = array.new<int>()
 
-// --- Break Detection ---------------------------------------------------
-// A candle must close past the Action Line to trigger.
-was_above = high[1] > al_prev
-was_below = low[1]  < al_prev
+for i = PIVOT_LEN to LOOKBACK
+    ph = ta.pivothigh(high, PIVOT_LEN, PIVOT_LEN)[i]
+    if not na(ph)
+        array.push(pivot_highs, ph)
+        array.push(pivot_hbids, bar_index[i])
+    pl = ta.pivotlow(low, PIVOT_LEN, PIVOT_LEN)[i]
+    if not na(pl)
+        array.push(pivot_lows, pl)
+        array.push(pivot_lbids, bar_index[i])
 
-break_bull = was_below and close > al_at_bar  // was under line, now closed above
-break_bear = was_above and close < al_at_bar  // was above line, now closed below
+// --- Trendline fitting --------------------------------------------------
+// For a given set of pivot points, find a line that touches N+ of them
+// within tolerance.  Returns [ok, y1, x1, y2, x2, touch_count].
+find_trendline(prices, bar_ids, is_resistance) =>
+    n = array.size(prices)
+    best_count = 0
+    best_y1 = na; best_x1 = na; best_y2 = na; best_x2 = na
 
-// --- Entry Logic -------------------------------------------------------
-if (break_bull or break_bear) and trendlineAttempt == 0
-    entryPrice := close
-    tradeDirection  := break_bull ? 1 : -1
-    breakBar   := bar_index
+    // Try every pair of pivots as anchor points.
+    for i = 0 to n - 2
+        y1 = array.get(prices, i)
+        x1 = array.get(bar_ids, i)
+        for j = i + 1 to n - 1
+            y2 = array.get(prices, j)
+            x2 = array.get(bar_ids, j)
 
-    // Stop = Safety Line value 4 bars after the break.
-    stopPrice  := f_line_price(sl_price_a, sl_x1, sl_price_b, sl_x2, bar_index + 4)
-    risk       = math.abs(entryPrice - stopPrice)
-    tpPrice    := if tradeDirection == 1
-        entryPrice + risk * tp_r_mult
+            // Check slope (we calculate via helper after we know y1,x1,y2,x2)
+            angle = line_angle(y1, x1, y2, x2)
+            if angle > SLOPE_DEG
+                continue
+
+            // Check total span (3+ weeks on 4H = ~126 bars)
+            span_bars = x2 - x1
+            if span_bars < 126
+                continue
+
+            // Count touches within tolerance
+            count = 0
+            last_touch_bar = -999
+            for k = 0 to n - 1
+                px = array.get(bar_ids, k)
+                py = array.get(prices, k)
+                if px < x1 or px > x2
+                    continue
+
+                // Compute line price at this bar
+                m = (y2 - y1) / (x2 - x1)
+                line_price = y1 + m * (px - x1)
+
+                // Distance as % of price
+                dist_pct = math.abs(py - line_price) / line_price
+                if dist_pct <= TOUCH_TOL
+                    // Check spacing: 6+ candles since last touch
+                    if px - last_touch_bar >= MIN_CANDLE_GAP
+                        count += 1
+                        last_touch_bar := px
+
+            if count >= best_count
+                best_count := count
+                best_y1 := y1; best_x1 := x1
+                best_y2 := y2; best_x2 := x2
+
+    [best_count >= MIN_TAPS, best_y1, best_x1, best_y2, best_x2, best_count]
+
+// Run detection for both resistance (pivot highs) and support (pivot lows).
+[res_ok, res_y1, res_x1, res_y2, res_x2, res_count]  = find_trendline(pivot_highs, pivot_hbids, true)
+[spt_ok, spt_y1, spt_x1, spt_y2, spt_x2, spt_count]  = find_trendline(pivot_lows,  pivot_lbids, false)
+
+// Pick the stronger line (more touches) as Action, the other as Safety.
+// If only one is valid, the Safety defaults to a static offset.
+var line actionLine = line.new(na, na, na, na, extend=extend.right, color=color.blue, width=2)
+var line safetyLine = line.new(na, na, na, na, extend=extend.right, color=color.red, width=2, style=line.style_dashed)
+
+action_ok = false
+safety_ok = false
+
+if res_ok and spt_ok
+    if res_count >= spt_count
+        // Resistance is the Action (downtrend) -- support is Safety
+        line.set_xy1(actionLine, res_x1, res_y1)
+        line.set_xy2(actionLine, res_x2, res_y2)
+        line.set_xy1(safetyLine, spt_x1, spt_y1)
+        line.set_xy2(safetyLine, spt_x2, spt_y2)
+        action_ok := true; safety_ok := true
     else
-        entryPrice - risk * tp_r_mult
+        // Support is the Action (uptrend) -- resistance is Safety
+        line.set_xy1(actionLine, spt_x1, spt_y1)
+        line.set_xy2(actionLine, spt_x2, spt_y2)
+        line.set_xy1(safetyLine, res_x1, res_y1)
+        line.set_xy2(safetyLine, res_x2, res_y2)
+        action_ok := true; safety_ok := true
+else
+    if res_ok
+        line.set_xy1(actionLine, res_x1, res_y1)
+        line.set_xy2(actionLine, res_x2, res_y2)
+        action_ok := true
+    if spt_ok
+        line.set_xy1(actionLine, spt_x1, spt_y1)
+        line.set_xy2(actionLine, spt_x2, spt_y2)
+        action_ok := true
 
-    // --- Visual marker on the break bar ---
-    label.new(bar_index, tradeDirection == 1 ? low : high,
-         "BREAK\nEntry: " + str.tostring(entryPrice) + "\nStop: " +
-         str.tostring(stopPrice) + "\nTP: " + str.tostring(tpPrice),
-         style = tradeDirection == 1 ? label.style_label_up : label.style_label_down,
-         color = tradeDirection == 1 ? color.green : color.red,
+// --- Line value at a bar -------------------------------------------------
+f_price(y1, x1, y2, x2, x) =>
+    if na(x1) or na(x2) or x2 == x1
+        na
+    else
+        y1 + ((y2 - y1) / (x2 - x1)) * (x - x1)
+
+// --- Break detection ----------------------------------------------------
+action_price = na
+action_broken = false
+break_is_bull = false
+
+if action_ok
+    ay1 = line.get_y1(actionLine); ax1 = line.get_x1(actionLine)
+    ay2 = line.get_y2(actionLine); ax2 = line.get_x2(actionLine)
+    action_price := f_price(ay1, ax1, ay2, ax2, bar_index)
+    prev_px      = f_price(ay1, ax1, ay2, ax2, bar_index[1])
+
+    if not na(action_price) and bar_index >= ax2
+        was_above = high[1] > prev_px
+        was_below = low[1]  < prev_px
+
+        break_is_bull := was_below and close > action_price
+        break_is_bear := was_above and close < action_price
+        action_broken := break_is_bull or break_is_bear
+
+// --- State ---------------------------------------------------------------
+var int  attempt = 0
+var float entryP  = na
+var float stopP   = na
+var float tpP     = na
+var int   direction = 0  // 1 long, -1 short
+
+// --- Entry ---------------------------------------------------------------
+if action_broken and attempt == 0
+    entryP := close
+    direction := break_is_bull ? 1 : -1
+
+    // Safety line stop = its value 4 bars forward
+    sy1 = line.get_y1(safetyLine); sx1 = line.get_x1(safetyLine)
+    sy2 = line.get_y2(safetyLine); sx2 = line.get_x2(safetyLine)
+    if safety_ok
+        stopP := f_price(sy1, sx1, sy2, sx2, bar_index + 4)
+    else
+        stopP := direction == 1 ? low - (high - low) * 2 : high + (high - low) * 2
+
+    risk = math.abs(entryP - stopP)
+    tpP := if direction == 1
+        entryP + risk * TP_R_MULT
+    else
+        entryP - risk * TP_R_MULT
+
+    label.new(bar_index, direction == 1 ? low : high,
+         "BREAK\nEntry: " + str.tostring(entryP) + "\nStop: " +
+         str.tostring(stopP) + "\nTP: " + str.tostring(tpP),
+         style = direction == 1 ? label.style_label_up : label.style_label_down,
+         color = direction == 1 ? color.green : color.red,
          textcolor = color.white, size = size.small)
 
-    // --- Execute trade ---
-    if tradeDirection == 1
-        strategy.entry("Long", strategy.long, alert_message="buy")
-        strategy.exit("XL", "Long", stop=stopPrice, limit=tpPrice,
-             alert_message="exit_long")
+    if direction == 1
+        strategy.entry("L", strategy.long, alert_message="buy")
+        strategy.exit("XL", "L", stop=stopP, limit=tpP, alert_message="exit_long")
     else
-        strategy.entry("Short", strategy.short, alert_message="sell")
-        strategy.exit("XS", "Short", stop=stopPrice, limit=tpPrice,
-             alert_message="exit_short")
+        strategy.entry("S", strategy.short, alert_message="sell")
+        strategy.exit("XS", "S", stop=stopP, limit=tpP, alert_message="exit_short")
 
-    trendlineAttempt := 1  // One attempt per trendline.
+    attempt := 1
 
-// --- Reset After Trade Closes ------------------------------------------
-if strategy.position_size == 0 and trendlineAttempt == 1
-    trendlineAttempt := 0
-    entryPrice := na
-    stopPrice := na
-    tpPrice := na
-    breakBar := 0
-    tradeDirection := 0
+// --- Reset ---------------------------------------------------------------
+if strategy.position_size == 0 and attempt == 1
+    attempt := 0; entryP := na; stopP := na; tpP := na; direction := 0
 
-// --- Alerts (designed for the webhook server) --------------------------
-// Create an Alert in TradingView for each condition.  Use this as the
-// alert message body:
-//
-// {"ticker":"{{ticker}}","action":"{{strategy.order.alert_message}}",
-//  "price":{{strategy.order.price}},"qty":1,
-//  "signal_id":"sig_{{timenow}}","strategy":"TrendlineBreak"}
-
-alertcondition(break_bull, "Long Entry", "Action Line broken up")
-alertcondition(break_bear, "Short Entry", "Action Line broken down")
+// --- Alerts --------------------------------------------------------------
+alertcondition(action_broken, "Trendline Break",
+     "Price broke the auto-detected trendline")
