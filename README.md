@@ -49,17 +49,20 @@ This prints a public URL like `https://abc123.ngrok-free.app`. Configure this in
 
 ## Configuring TradingView
 
-1. Write a Pine Script strategy (or use an existing one).
-2. Create an Alert → select your strategy → "More" → Webhook URL.
-3. Set the webhook URL to `https://your-ngrok-domain.ngrok-free.app/webhook/tradingview`.
-4. In the alert message JSON body, use this format:
+1. Copy `scripts/mpl_paper_trader_template.pine` into the Pine Editor.
+2. Add your strategy logic (the template has `// Phase 2` markers).
+3. Create an Alert → select your strategy → "More" → Webhook URL.
+4. Set the webhook URL to `https://your-ngrok-domain.ngrok-free.app/webhook/tradingview`.
+5. In the alert message JSON body, use this format:
 
 ```json
 {
-  "ticker": "CME_MINI:MPL1!",
-  "action": "buy",
-  "price": {{close}},
-  "signal_id": "sig_{{timenow}}"
+  "ticker": "{{ticker}}",
+  "action": "{{strategy.order.alert_message}}",
+  "price": {{strategy.order.price}},
+  "qty": 1,
+  "signal_id": "sig_{{timenow}}",
+  "strategy": "MPL Paper Trader Template"
 }
 ```
 
