@@ -113,7 +113,10 @@ if (break_bull or break_bear) and trendlineAttempt == 0
 // --- Reset After Trade Closes ------------------------------------------
 if strategy.position_size == 0 and trendlineAttempt == 1
     trendlineAttempt := 0
-    entryPrice := na; stopPrice := na; tpPrice := na; breakBar := na
+    entryPrice := na
+    stopPrice := na
+    tpPrice := na
+    breakBar := na
 
 // --- Alerts (designed for the webhook server) --------------------------
 // Create an Alert in TradingView for each condition.  Use this as the
