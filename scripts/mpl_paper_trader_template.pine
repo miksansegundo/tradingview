@@ -15,20 +15,11 @@ MIN_TIME_GAP   = input.int(14, "Min days between taps", minval=1)
 SLOPE_DEG  = input.float(45.0, "Max slope (degrees)", minval=5, maxval=80)
 TP_R_MULT  = input.float(2.0, "Take Profit (R multiple)", step=0.5)
 
-// --- Helper: angle of a line in degrees on the chart --------------------
-line_angle(y1, x1, y2, x2) =>
-    rise = y2 - y1
-    run  = x2 - x1
-    if run == 0
-        90.0
-    else
-        range_high = ta.highest(high, LOOKBACK)
-        range_low  = ta.lowest(low, LOOKBACK)
-        price_range = range_high - range_low
-        bar_range   = LOOKBACK
-        angle_rad   = math.atan((rise / price_range) / (run / bar_range))
-        angle_deg   = angle_rad * 180.0 / math.pi
-        math.abs(angle_deg)
+// --- Chart range for angle calculation (pre-computed at top level) --------
+chart_high = ta.highest(high, LOOKBACK)
+chart_low  = ta.lowest(low, LOOKBACK)
+prange = chart_high - chart_low
+brange = LOOKBACK
 
 // --- Swing point detection ---------------------------------------------
 ph_series = ta.pivothigh(high, PIVOT_LEN, PIVOT_LEN)
@@ -69,7 +60,9 @@ find_trendline(prices, bar_ids, times, is_resistance) =>
         for j = i + 1 to n - 1
             y2 = array.get(prices, j)
             x2 = array.get(bar_ids, j)
-            angle = line_angle(y1, x1, y2, x2)
+            rise = y2 - y1
+            run = x2 - x1
+            angle = math.abs(math.atan((rise / prange) / (run / brange)) * 180.0 / math.pi)
             if angle > SLOPE_DEG
                 continue
             span_bars = x2 - x1
