@@ -4,49 +4,73 @@ strategy("MPL Trendline Break Strategy", overlay=true,
    currency=currency.USD)
 
 // --- How to use ----------------------------------------------------------
-// 1. Draw TWO trendlines on the chart using the Line tool (Alt+L):
-//    - Action Line (blue): the trendline to trade -- 3+ touches, <45 deg
-//    - Safety Line (red dashed): the opposing trendline that defines the stop
-// 2. Open the script Settings (gear icon) and select each line from the dropdown.
-// 3. The script monitors for a candle close past the Action Line.
+// 1. Identify a trendline on the 4H chart (3+ touches, <45 deg).
+// 2. Hover over the TWO outermost touch points (A = left, B = right).
+//    On the price axis, note the Price.  On the bar axis, note the bar
+//    number (shown at the top-left when you hover).  Count how many bars
+//    each is from the LAST bar on the chart (the furthest right bar).
+// 3. Enter those offsets and prices below.
+// 4. Do the same for the Safety Line (opposing trendline for the stop).
 
-// --- Inputs: pick the lines you drew on the chart -------------------------
-actionLine = input.line(defval=na, title="Action Line (draw on chart)")
-safetyLine = input.line(defval=na, title="Safety Line (draw on chart)")
+// --- Action Line -----------------------------------------------------------
+al_off1 = input.int(100, "Action - Bars ago (point A)", minval=1)
+al_prc1 = input.float(0.0, "Action - Price A")
+al_off2 = input.int(20, "Action - Bars ago (point B)", minval=1)
+al_prc2 = input.float(0.0, "Action - Price B")
+
+// --- Safety Line -----------------------------------------------------------
+sl_off1 = input.int(100, "Safety - Bars ago (point A)", minval=1)
+sl_prc1 = input.float(0.0, "Safety - Price A")
+sl_off2 = input.int(20, "Safety - Bars ago (point B)", minval=1)
+sl_prc2 = input.float(0.0, "Safety - Price B")
+
+// --- Risk -------------------------------------------------------------------
 tp_r = input.float(2.0, "Take Profit (R multiple)", step=0.5)
 
-// --- Extend both lines to the right ---------------------------------------
-if not na(actionLine)
-    line.set_extend(actionLine, extend.right)
-    line.set_style(actionLine, line.style_solid)
-    line.set_width(actionLine, 2)
-    line.set_color(actionLine, color.blue)
-if not na(safetyLine)
-    line.set_extend(safetyLine, extend.right)
-    line.set_style(safetyLine, line.style_dashed)
-    line.set_width(safetyLine, 2)
-    line.set_color(safetyLine, color.red)
+// --- Compute bar indices ----------------------------------------------------
+al_b1 = bar_index[al_off1]
+al_b2 = bar_index[al_off2]
+sl_b1 = bar_index[sl_off1]
+sl_b2 = bar_index[sl_off2]
 
-// --- Break detection ------------------------------------------------------
+// --- Draw lines -------------------------------------------------------------
+var line actionLine = line.new(na, na, na, na, extend=extend.right,
+     color=color.blue, width=2)
+var line safetyLine = line.new(na, na, na, na, extend=extend.right,
+     color=color.red, width=2, style=line.style_dashed)
+
+if not na(al_b1) and not na(al_b2)
+    line.set_xy1(actionLine, al_b1, al_prc1)
+    line.set_xy2(actionLine, al_b2, al_prc2)
+if not na(sl_b1) and not na(sl_b2)
+    line.set_xy1(safetyLine, sl_b1, sl_prc1)
+    line.set_xy2(safetyLine, sl_b2, sl_prc2)
+
+// --- Line price at a bar ----------------------------------------------------
+f_line(y1, x1, y2, x2, x) =>
+    if na(x1) or na(x2) or x2 == x1
+        na
+    else
+        y1 + ((y2 - y1) / (x2 - x1)) * (x - x1)
+
+// --- Break detection --------------------------------------------------------
 broken = false
 is_bull = false
 is_bear = false
-
-a_ok = not na(actionLine)
-s_ok = not na(safetyLine)
+a_ok = not na(al_b1) and not na(al_b2)
+s_ok = not na(sl_b1) and not na(sl_b2)
 
 if a_ok
-    ap = line.get_price(actionLine, bar_index)
-    pp = line.get_price(actionLine, bar_index[1])
-    ax2 = line.get_x2(actionLine)
-    if not na(ap) and bar_index >= ax2
+    ap = f_line(al_prc1, al_b1, al_prc2, al_b2, bar_index)
+    pp = f_line(al_prc1, al_b1, al_prc2, al_b2, bar_index[1])
+    if not na(ap) and bar_index >= al_b2
         was_above = high[1] > pp
         was_below = low[1] < pp
         is_bull := was_below and close > ap
         is_bear := was_above and close < ap
         broken := is_bull or is_bear
 
-// --- Entry ----------------------------------------------------------------
+// --- Entry ------------------------------------------------------------------
 var int  attempt = 0
 var float entryP = na
 var float stopP  = na
@@ -57,7 +81,7 @@ if broken and attempt == 0
     entryP := close
     dir := is_bull ? 1 : -1
     if s_ok
-        stopP := line.get_price(safetyLine, bar_index + 4)
+        stopP := f_line(sl_prc1, sl_b1, sl_prc2, sl_b2, bar_index + 4)
     else
         stopP := dir == 1 ? low - (high - low) * 2 : high + (high - low) * 2
     risk = math.abs(entryP - stopP)
