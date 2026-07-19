@@ -6,7 +6,7 @@ from src.paper_trading.engine import process_signal, _get_open_position
 from src.webhook.models import TradingViewAlert
 
 
-def _alert(action: str, price: float = 1000.0, qty: int = 1, signal_id: str = "sig_test"):
+def _alert(action: str, price: float = 1000.0, qty: int = 1, signal_id: str | None = None):
     return TradingViewAlert(ticker="MPL", action=action, price=price, qty=qty, signal_id=signal_id)
 
 
@@ -81,3 +81,16 @@ class TestReverse:
         pos = _get_open_position("MPL")
         assert pos is not None
         assert pos.side == "long"
+
+
+class TestDedup:
+    def test_duplicate_signal_id_rejected(self):
+        sig_id = "dup_001"
+        process_signal(_alert("buy", 1000.0, signal_id=sig_id))
+        with pytest.raises(ValueError, match="Duplicate signal"):
+            process_signal(_alert("buy", 1000.0, signal_id=sig_id))
+
+    def test_different_signal_id_accepted(self):
+        process_signal(_alert("buy", 1000.0, signal_id="a"))
+        order = process_signal(_alert("exit_long", 1010.0, signal_id="b"))
+        assert order.status == "filled"

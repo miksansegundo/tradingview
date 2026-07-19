@@ -38,7 +38,7 @@ def init_db() -> None:
                 price       REAL,
                 status      TEXT NOT NULL DEFAULT 'pending'
                             CHECK(status IN ('pending','filled','cancelled','rejected')),
-                signal_id   TEXT,
+                signal_id   TEXT UNIQUE,
                 created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
                 filled_at   TEXT,
                 fill_price  REAL,

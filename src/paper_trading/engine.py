@@ -50,6 +50,15 @@ def _close_position(symbol: str) -> None:
         conn.execute("DELETE FROM positions WHERE symbol = ?", (symbol,))
 
 
+def _signal_exists(signal_id: str) -> bool:
+    """Return True if a signal with this ID was already processed."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM orders WHERE signal_id = ? LIMIT 1", (signal_id,)
+        ).fetchone()
+    return row is not None
+
+
 def _insert_order(
     symbol: str,
     side: str,
@@ -111,14 +120,19 @@ def process_signal(alert: TradingViewAlert) -> Order:
 
     flat = current is None
 
+    # --- Dedup: reject if signal_id already processed ------------------------
+    if signal_id and _signal_exists(signal_id):
+        raise ValueError(f"Duplicate signal: {signal_id} already processed")
+
     # --- Flat -> enter ----------------------------------------------------
     if flat:
         if desired_side == "flat":
-            return _insert_order(symbol, "hold", 0, "cancelled", None, signal_id,
+            return _insert_order(symbol, "buy", 0, "cancelled", None, signal_id,
                                  "Already flat — nothing to close")
+        order_side = "buy" if desired_side == "long" else "sell"
         _update_position(symbol, desired_side, qty, price or 0.0)
         log_event("INFO", f"Opened {desired_side.upper()} {qty} {symbol} @ {price or 'market'}")
-        return _insert_order(symbol, desired_side, qty, "filled", price, signal_id, None)
+        return _insert_order(symbol, order_side, qty, "filled", price, signal_id, None)
 
     # --- In position -> manage --------------------------------------------
     if desired_side == current.side:
@@ -127,17 +141,21 @@ def process_signal(alert: TradingViewAlert) -> Order:
             "Scaling not supported in Phase 1."
         )
     elif desired_side == "flat":
+        # Map position side to order side: closing long = sell, closing short = buy
+        close_side = "sell" if current.side == "long" else "buy"
         pnl = (price - current.entry_price) * current.qty if price and current.side == "long" else \
               (current.entry_price - price) * current.qty if price else 0.0
         _close_position(symbol)
         log_event("INFO", f"Closed {current.side.upper()} {current.qty} {symbol} "
                           f"@ {price or 'market'} — PnL: {pnl:.2f}")
-        return _insert_order(symbol, current.side, current.qty, "filled", price, signal_id,
+        return _insert_order(symbol, close_side, current.qty, "filled", price, signal_id,
                              f"Close {current.side.upper()} — PnL {pnl:.2f}")
     else:
         # Reverse: close current, open opposite
+        # Map desired_side to order side for the new position: long = buy, short = sell
+        order_side = "buy" if desired_side == "long" else "sell"
         _close_position(symbol)
         _update_position(symbol, desired_side, qty, price or 0.0)
         log_event("INFO", f"Reversed {current.side.upper()} -> {desired_side.upper()} {qty} {symbol}")
-        return _insert_order(symbol, desired_side, qty, "filled", price, signal_id,
+        return _insert_order(symbol, order_side, qty, "filled", price, signal_id,
                              f"Reverse from {current.side.upper()}")
