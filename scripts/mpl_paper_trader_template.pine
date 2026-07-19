@@ -57,7 +57,10 @@ if bar_index == last_bar_index - 1 and not detected
     f_find(prices, bars, times) =>
         n = array.size(prices)
         best_n = 0
-        by1 = float(na); bx1 = int(na); by2 = float(na); bx2 = int(na)
+        by1 = float(na)
+        bx1 = int(na)
+        by2 = float(na)
+        bx2 = int(na)
         g = MIN_TIME_GAP * 86400000
         for i = 0 to n - 2
             y1 = array.get(prices, i)
@@ -93,7 +96,10 @@ if bar_index == last_bar_index - 1 and not detected
                             lt_tim := pt
                 if cnt >= best_n
                     best_n := cnt
-                    by1 := y1; bx1 := x1; by2 := y2; bx2 := x2
+                    by1 := y1
+                    bx1 := x1
+                    by2 := y2
+                    bx2 := x2
         [best_n >= MIN_TAPS, by1, bx1, by2, bx2, best_n]
 
     [r_ok, r_y1, r_x1, r_y2, r_x2, r_n] = f_find(pivot_hp, pivot_hb, pivot_ht)
@@ -101,19 +107,37 @@ if bar_index == last_bar_index - 1 and not detected
 
     if r_ok and s_ok
         if r_n >= s_n
-            act_y1 := r_y1; act_x1 := r_x1; act_y2 := r_y2; act_x2 := r_x2
-            saf_y1 := s_y1; saf_x1 := s_x1; saf_y2 := s_y2; saf_x2 := s_x2
+            act_y1 := r_y1
+            act_x1 := r_x1
+            act_y2 := r_y2
+            act_x2 := r_x2
+            saf_y1 := s_y1
+            saf_x1 := s_x1
+            saf_y2 := s_y2
+            saf_x2 := s_x2
             detected := true
         else
-            act_y1 := s_y1; act_x1 := s_x1; act_y2 := s_y2; act_x2 := s_x2
-            saf_y1 := r_y1; saf_x1 := r_x1; saf_y2 := r_y2; saf_x2 := r_x2
+            act_y1 := s_y1
+            act_x1 := s_x1
+            act_y2 := s_y2
+            act_x2 := s_x2
+            saf_y1 := r_y1
+            saf_x1 := r_x1
+            saf_y2 := r_y2
+            saf_x2 := r_x2
             detected := true
     else
         if r_ok
-            act_y1 := r_y1; act_x1 := r_x1; act_y2 := r_y2; act_x2 := r_x2
+            act_y1 := r_y1
+            act_x1 := r_x1
+            act_y2 := r_y2
+            act_x2 := r_x2
             detected := true
         if s_ok
-            act_y1 := s_y1; act_x1 := s_x1; act_y2 := s_y2; act_x2 := s_x2
+            act_y1 := s_y1
+            act_x1 := s_x1
+            act_y2 := s_y2
+            act_x2 := s_x2
             detected := true
 
 // --- Draw lines (every bar to keep them extending) -----------------------
@@ -181,6 +205,10 @@ if action_broken and attempt == 0
     attempt := 1
 
 if strategy.position_size == 0 and attempt == 1
-    attempt := 0; entryP := na; stopP := na; tpP := na; direction := 0
+    attempt := 0
+    entryP := na
+    stopP := na
+    tpP := na
+    direction := 0
 
 alertcondition(action_broken, "Trendline Break", "Price broke the auto-detected trendline")
