@@ -60,6 +60,7 @@ f_line(y1, x1, y2, x2, x) =>
 // --- Break detection ------------------------------------------------------
 broken = false
 is_bull = false
+is_bear = false
 
 if a_ok
     ap = f_line(al_p1, al_b1, al_p2, al_b2, bar_index)
