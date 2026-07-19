@@ -37,21 +37,25 @@ line_angle(y1, x1, y2, x2) =>
         math.abs(angle_deg)
 
 // --- Swing point detection ---------------------------------------------
-// Collect recent pivot highs and lows.
+// Collect recent pivot highs and lows.  Call pivot functions at top level
+// (required by Pine for consistency), then reference historical values.
+ph_series = ta.pivothigh(high, PIVOT_LEN, PIVOT_LEN)
+pl_series = ta.pivotlow(low, PIVOT_LEN, PIVOT_LEN)
+
 pivot_highs = array.new<float>()
 pivot_hbids = array.new<int>()
-pivot_htimes = array.new<int>()   // timestamp of each pivot high
+pivot_htimes = array.new<int>()
 pivot_lows  = array.new<float>()
 pivot_lbids = array.new<int>()
-pivot_ltimes = array.new<int>()   // timestamp of each pivot low
+pivot_ltimes = array.new<int>()
 
 for i = PIVOT_LEN to LOOKBACK
-    ph = ta.pivothigh(high, PIVOT_LEN, PIVOT_LEN)[i]
+    ph = ph_series[i]
     if not na(ph)
         array.push(pivot_highs, ph)
         array.push(pivot_hbids, bar_index[i])
         array.push(pivot_htimes, time[i])
-    pl = ta.pivotlow(low, PIVOT_LEN, PIVOT_LEN)[i]
+    pl = pl_series[i]
     if not na(pl)
         array.push(pivot_lows, pl)
         array.push(pivot_lbids, bar_index[i])
