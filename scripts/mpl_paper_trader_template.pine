@@ -14,7 +14,7 @@ SLOPE_DEG  = input.float(45.0, "Max slope (degrees)", minval=5, maxval=80)
 TP_R_MULT  = input.float(2.0, "Take Profit (R multiple)", step=0.5)
 
 // --- Pre-computed range for angle (capped to available history) ----------
-safe_lookback = math.min(LOOKBACK, bar_index)
+safe_lookback = math.max(math.min(LOOKBACK, bar_index), 1)
 chart_high = ta.highest(high, safe_lookback)
 chart_low  = ta.lowest(low, safe_lookback)
 prange = chart_high - chart_low
