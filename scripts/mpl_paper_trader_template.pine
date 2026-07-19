@@ -87,8 +87,10 @@ if (break_bull or break_bear) and trendlineAttempt == 0
     // Stop = Safety Line value 4 bars after the break.
     stopPrice  := f_line_price(sl_price_a, sl_x1, sl_price_b, sl_x2, bar_index + 4)
     risk       := math.abs(entryPrice - stopPrice)
-    tpPrice    := longTrade ? entryPrice + risk * tp_r_mult
-                            : entryPrice - risk * tp_r_mult
+    tpPrice    := if longTrade
+        entryPrice + risk * tp_r_mult
+    else
+        entryPrice - risk * tp_r_mult
 
     // --- Visual marker on the break bar ---
     label.new(bar_index, longTrade ? low : high,
