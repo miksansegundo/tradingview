@@ -21,5 +21,6 @@ echo "→ Sending: $ACTION to $HOST/webhook/tradingview"
 echo "$PAYLOAD" | python3 -m json.tool
 
 curl -s -X POST "$HOST/webhook/tradingview" \
+  -H "ngrok-skip-browser-warning: true" \
   -H "Content-Type: application/json" \
   -d "$PAYLOAD" | python3 -m json.tool

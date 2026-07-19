@@ -36,16 +36,25 @@ The server starts on `http://localhost:8000` by default. Set `PORT` in `.env` to
 
 TradingView needs a public URL to send webhook alerts. ngrok creates a secure tunnel to your local server.
 
-1. Sign up at https://ngrok.com and get your auth token.
-2. Set `NGROK_TOKEN=your_token` in `.env`.
-3. (Optional) Reserve a domain in ngrok dashboard and set `NGROK_DOMAIN=your-domain.ngrok-free.app` in `.env`.
-4. Start the tunnel:
+### SSH tunnel (recommended)
+
+Add your SSH public key to ngrok at https://dashboard.ngrok.com/tunnels/ssh-keys, then:
 
 ```bash
-python -c "from src.tunnel.ngrok import start_tunnel; start_tunnel()"
+ssh -R 443:localhost:8000 v2@connect.ngrok-agent.com http
 ```
 
-This prints a public URL like `https://abc123.ngrok-free.app`. Configure this in TradingView's alert webhook settings.
+This prints a public URL like `https://saucy-manicure-quickstep.ngrok-free.dev`. The first time you connect, it adds the host key to `known_hosts` automatically.
+
+### Testing locally with curl
+
+When testing through the ngrok URL with curl, add the bypass header:
+
+```bash
+curl -H "ngrok-skip-browser-warning: true" https://your-tunnel.ngrok-free.dev/health
+```
+
+TradingView's server-side webhook requests work without this header — they use a non-browser User-Agent and bypass the interstitial automatically.
 
 ## Configuring TradingView
 
